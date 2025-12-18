@@ -270,6 +270,26 @@ async def scrape_profile(
             except Exception:
                 pass
 
+        # Extract "My Business" from .widgetMemberTxtVideo section (special case)
+        my_business: Optional[str] = None
+        try:
+            my_business_content = await page.evaluate("""
+                () => {
+                    const section = document.querySelector('.widgetMemberTxtVideo');
+                    if (section) {
+                        const h2 = section.querySelector('h2');
+                        if (h2 && h2.textContent.includes('My Business')) {
+                            const p = section.querySelector('p');
+                            return p ? p.textContent.trim() : '';
+                        }
+                    }
+                    return '';
+                }
+            """)
+            my_business = (my_business_content or "").strip() or None
+        except Exception:
+            pass
+
         section_data: Dict[str, Optional[str]] = {k: None for k in TARGET_SECTIONS}
         try:
             # Not all profiles have these; don't hard-wait long.
@@ -285,19 +305,21 @@ async def scrape_profile(
         except PlaywrightTimeoutError:
             pass
 
+        # If "My Business" wasn't found in widgetMemberTxtVideo, check widgetProfile as fallback
+        if not my_business:
+            my_business = section_data.get("My Business")
+
         data = {
             "name": name,
             "business": business,
             "category": category,
             "phone": phone,
+            "my_business": my_business,  # Always include, even if null
             "top_product": section_data["Top Product"],
             "ideal_referral": section_data["Ideal Referral"],
             "top_problem_solved": section_data["Top Problem Solved"],
             "my_favourite_bni_story": section_data["My Favourite BNI Story"],
         }
-        mb = section_data.get("My Business")
-        if mb:
-            data["my_business"] = mb
         return data
     finally:
         await page.close()
