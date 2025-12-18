@@ -210,13 +210,19 @@ async def scrape_profile(
                 # Wait for either the company detail section or the profile sections to appear
                 try:
                     await page.wait_for_selector(
-                        ".widgetMemberCompanyDetail, .widgetMemberProfileTop, .widgetProfile",
-                        timeout=15_000
+                        ".widgetMemberCompanyDetail, .widgetMemberProfileTop, .widgetProfile, .profilephoto",
+                        timeout=25_000
                     )
-                    await page.wait_for_timeout(1_500)  # Extra delay for AJAX content to fully render
+                    await page.wait_for_timeout(3_000)  # Extra delay for AJAX content to fully render
                 except PlaywrightTimeoutError:
                     # If sections don't appear, wait a bit more
-                    await page.wait_for_timeout(2_000)
+                    await page.wait_for_timeout(4_000)
+                # Additional wait to ensure all images and content are loaded
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=15_000)
+                except PlaywrightTimeoutError:
+                    pass  # Continue even if networkidle times out
+                await page.wait_for_timeout(2_000)  # Final delay to ensure everything is rendered
                 last_err = None
                 break
             except Exception as e:
@@ -228,6 +234,7 @@ async def scrape_profile(
                 "business": business,
                 "category": category,
                 "phone": phone_from_list or None,
+                "profile_image": None,
                 "company_name": None,
                 "company_address": None,
                 "company_website": None,
@@ -283,14 +290,30 @@ async def scrape_profile(
             except Exception:
                 pass
 
+        # Extract profile image
+        profile_image: Optional[str] = None
+        try:
+            profile_img = await page.query_selector(".profilephoto img, .memberProfileInfo .profilephoto img")
+            if profile_img:
+                img_src = await profile_img.get_attribute("src")
+                if img_src:
+                    # Convert relative URL to absolute URL
+                    if img_src.startswith("http://") or img_src.startswith("https://"):
+                        profile_image = img_src
+                    else:
+                        # Use urljoin to handle both absolute paths (/) and relative paths
+                        profile_image = urljoin(profile_url, img_src)
+        except Exception:
+            pass
+
         # Extract company name and address from .widgetMemberCompanyDetail section
         company_name: Optional[str] = None
         company_address: Optional[str] = None
         company_website: Optional[str] = None
         try:
             # Wait for the company detail section to appear
-            await page.wait_for_selector(".widgetMemberCompanyDetail", timeout=10_000)
-            await page.wait_for_timeout(500)  # Small delay to ensure content is rendered
+            await page.wait_for_selector(".widgetMemberCompanyDetail", timeout=15_000)
+            await page.wait_for_timeout(1_000)  # Small delay to ensure content is rendered
             
             company_info = await page.evaluate("""
                 () => {
@@ -419,6 +442,7 @@ async def scrape_profile(
             "business": business,
             "category": category,
             "phone": phone,
+            "profile_image": profile_image,
             "company_name": company_name,
             "company_address": company_address,
             "company_website": company_website,
